@@ -83,14 +83,20 @@ export interface SummarizationRequestedContent {
   msg: string;
 }
 
-export interface ContextPathsContent {
-  type: 'contextPaths';
-  paths: ContextPathItem[];
+export interface SessionFile {
+  id: string;
+  path: string;
+  type: 'file' | 'directory' | 'image';
+  // Image-specific properties (only present for images)
+  dataUrl?: string; // For immediate preview
+  filePath?: string; // Path on filesystem after saving (for images)
+  isLoading?: boolean;
+  error?: string;
 }
 
-export interface ContextPathItem {
-  path: string;
-  type: 'file' | 'directory' | 'unknown';
+export interface SessionFilesContent {
+  type: 'sessionFiles';
+  files: SessionFile[];
 }
 
 export type MessageContent =
@@ -101,7 +107,7 @@ export type MessageContent =
   | ToolConfirmationRequestMessageContent
   | ContextLengthExceededContent
   | SummarizationRequestedContent
-  | ContextPathsContent;
+  | SessionFilesContent;
 
 export interface Message {
   id?: string;
@@ -113,7 +119,7 @@ export interface Message {
 }
 
 // Helper functions to create messages
-export function createUserMessage(text: string, contextPaths: ContextPathItem[] = []): Message {
+export function createUserMessage(text: string, sessionFiles: SessionFile[] = []): Message {
   const content: MessageContent[] = [];
 
   // Add text content if there's text
@@ -121,9 +127,9 @@ export function createUserMessage(text: string, contextPaths: ContextPathItem[] 
     content.push({ type: 'text', text: text.trim() });
   }
 
-  // Add context file content only if there are context files
-  if (contextPaths.length > 0) {
-    content.push({ type: 'contextPaths', paths: contextPaths });
+  // Add session files content only if there are session files
+  if (sessionFiles.length > 0) {
+    content.push({ type: 'sessionFiles', files: sessionFiles });
   }
 
   return {
@@ -202,6 +208,13 @@ export function createToolErrorResponseMessage(id: string, error: string): Messa
       },
     ],
   };
+}
+
+// Helper functions for session files
+export function getSessionFilesFromMessage(message: Message): SessionFile[] {
+  return message.content
+    .filter((content): content is SessionFilesContent => content.type === 'sessionFiles')
+    .flatMap((content) => content.files);
 }
 
 // Generate a unique ID for messages

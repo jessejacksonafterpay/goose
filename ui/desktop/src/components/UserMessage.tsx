@@ -4,7 +4,7 @@ import ImagePreview from './ImagePreview';
 import { extractUrls } from '../utils/urlUtils';
 import { extractImagePaths, removeImagePathsFromText } from '../utils/imageUtils';
 import MarkdownContent from './MarkdownContent';
-import { Message, getTextContent } from '../types/message';
+import { Message, getTextContent, getSessionFilesFromMessage } from '../types/message';
 import MessageCopyLink from './MessageCopyLink';
 import { formatMessageTimestamp } from '../utils/timeUtils';
 import { Document } from './icons';
@@ -26,10 +26,8 @@ export default function UserMessage({ message }: UserMessageProps) {
   // Remove image paths from text for display
   const displayText = removeImagePathsFromText(textContent, imagePaths);
 
-  // Extract context paths from the message
-  const contextPaths = message.content
-    .filter((content) => content.type === 'contextPaths')
-    .flatMap((content) => content.paths);
+  // Extract session files from the message
+  const sessionFiles = getSessionFilesFromMessage(message);
 
   // Memoize the timestamp
   const timestamp = useMemo(() => formatMessageTimestamp(message.created), [message.created]);
@@ -53,21 +51,21 @@ export default function UserMessage({ message }: UserMessageProps) {
             </div>
           )}
 
-          {/* Render context paths if any */}
-          {contextPaths.length > 0 && (
+          {/* Render session files if any */}
+          {sessionFiles.length > 0 && (
             <div className="flex flex-wrap gap-2 mt-2">
-              {contextPaths.map((contextPath, index) => (
+              {sessionFiles.map((sessionFile, index) => (
                 <div
-                  key={`${contextPath.path}-${index}`}
+                  key={`${sessionFile.path}-${index}`}
                   className="flex items-center gap-1 px-2 py-1 bg-bgSubtle border border-borderSubtle rounded-full text-xs text-textStandard"
                 >
-                  {contextPath.type === 'directory' ? (
+                  {sessionFile.type === 'directory' ? (
                     <FolderOpen className="w-3 h-3 text-textSubtle" />
                   ) : (
                     <Document className="w-3 h-3 text-textSubtle" />
                   )}
-                  <span className="max-w-[200px] truncate" title={contextPath.path}>
-                    {contextPath.path.split('/').pop() || contextPath.path}
+                  <span className="max-w-[200px] truncate" title={sessionFile.path}>
+                    {sessionFile.path.split('/').pop() || sessionFile.path}
                   </span>
                 </div>
               ))}

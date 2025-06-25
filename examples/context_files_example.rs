@@ -1,4 +1,4 @@
-use goose::message::{Message, MessageContent, ContextPathItem, PathType};
+use goose::message::{Message, MessageContent, SessionFile};
 use goose::providers::base::Provider;
 use goose::providers::factory::create_provider;
 use goose::model::ModelConfig;
@@ -13,29 +13,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let provider = create_provider("openai", &model_config)?;
     let provider = Arc::new(provider);
 
-    // Create a message with context files
+    // Create a message with session files
     let message = Message::user()
         .with_text("Please analyze these files and tell me what they contain")
-        .with_context_files(vec![
-            ContextPathItem { path: "path/to/file1.txt".to_string(), path_type: PathType::File },
-            ContextPathItem { path: "path/to/file2.py".to_string(), path_type: PathType::File },
-            ContextPathItem { path: "path/to/config.json".to_string(), path_type: PathType::File },
+        .with_session_files(vec![
+            SessionFile { 
+                id: "file1".to_string(),
+                path: "path/to/file1.txt".to_string(), 
+                file_type: "file".to_string(),
+                data_url: None,
+                file_path: None,
+                is_loading: None,
+                error: None,
+            },
+            SessionFile { 
+                id: "file2".to_string(),
+                path: "path/to/file2.py".to_string(), 
+                file_type: "file".to_string(),
+                data_url: None,
+                file_path: None,
+                is_loading: None,
+                error: None,
+            },
+            SessionFile { 
+                id: "file3".to_string(),
+                path: "path/to/config.json".to_string(), 
+                file_type: "file".to_string(),
+                data_url: None,
+                file_path: None,
+                is_loading: None,
+                error: None,
+            },
         ]);
 
-    println!("Created message with context files:");
+    println!("Created message with session files:");
     println!("Role: {:?}", message.role);
     println!("Content count: {}", message.content.len());
     
-    // Print the context files content
+    // Print the session files content
     for content in &message.content {
         match content {
             MessageContent::Text(text) => {
                 println!("Text content: {}", text.text);
             }
-            MessageContent::ContextPaths(context_files) => {
-                println!("Context files:");
-                for path_item in &context_files.paths {
-                    println!("  - {} ({})", path_item.path, path_item.path_type);
+            MessageContent::SessionFiles(session_files) => {
+                println!("Session files:");
+                for file in &session_files.files {
+                    println!("  - {} ({})", file.path, file.file_type);
                 }
             }
             _ => {
@@ -48,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let response = provider.complete("You are a helpful assistant.", &[message], &[]).await?;
     // println!("LLM Response: {}", response.0.as_concat_text());
 
-    println!("\nThe ContextPaths content will be converted to text when sent to the LLM:");
+    println!("\nThe SessionFiles content will be converted to text when sent to the LLM:");
     println!("'The following files have been added to the context:'");
     println!("followed by the list of file paths.");
 

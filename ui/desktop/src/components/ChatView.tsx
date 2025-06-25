@@ -43,17 +43,8 @@ import {
   ToolConfirmationRequestMessageContent,
   getTextContent,
   TextContent,
-  ContextPathItem,
+  SessionFile,
 } from '../types/message';
-
-// Image handling interfaces and constants
-interface PastedImage {
-  id: string;
-  dataUrl: string; // For immediate preview
-  filePath?: string; // Path on filesystem after saving
-  isLoading: boolean;
-  error?: string;
-}
 
 // Constants for image handling
 const MAX_IMAGES_PER_MESSAGE = 5;
@@ -121,8 +112,7 @@ function ChatContent({
   const [isGeneratingRecipe, setIsGeneratingRecipe] = useState(false);
   const [sessionTokenCount, setSessionTokenCount] = useState<number>(0);
   const [ancestorMessages, setAncestorMessages] = useState<Message[]>([]);
-  const [sessionContextPaths, setSessionContextPaths] = useState<ContextPathItem[]>([]);
-  const [pastedImages, setPastedImages] = useState<PastedImage[]>([]);
+  const [sessionFiles, setSessionFiles] = useState<SessionFile[]>([]);
 
   const scrollRef = useRef<ScrollAreaHandle>(null);
 
@@ -348,32 +338,20 @@ function ChatContent({
     window.electron.startPowerSaveBlocker();
     const customEvent = e as unknown as CustomEvent;
     const combinedTextFromInput = customEvent.detail?.value || '';
-    const contextPaths = customEvent.detail?.contextPaths || [];
+    const submittedSessionFiles = customEvent.detail?.sessionFiles || [];
 
-    // Allow submission if there's text or context paths
+    // Allow submission if there's text or session files
     const hasText = combinedTextFromInput.trim();
-    const hasContextPaths = contextPaths.length > 0;
-    const hasContent = hasText || hasContextPaths;
+    const hasSessionFiles = submittedSessionFiles.length > 0;
+    const hasContent = hasText || hasSessionFiles;
 
     if (hasContent) {
       setLastInteractionTime(Date.now());
 
-      // Calculate the updated context files (combining existing and new ones)
-      const updatedContextPaths = [...sessionContextPaths];
-      if (contextPaths.length > 0) {
-        const newContextPaths = contextPaths.filter(
-          (contextPath: ContextPathItem) =>
-            !sessionContextPaths.some((fp) => fp.path === contextPath.path)
-        );
-        if (newContextPaths.length > 0) {
-          updatedContextPaths.push(...newContextPaths);
-        }
-      }
-
-      // Create user message with text (if any) and context paths
+      // Create user message with text (if any) and session files
       const userMessage = createUserMessage(
         hasText ? combinedTextFromInput.trim() : '',
-        updatedContextPaths
+        submittedSessionFiles // Use submitted session files
       );
 
       if (summarizedThread.length > 0) {
@@ -397,8 +375,8 @@ function ChatContent({
         }
       }
 
-      // Clear sessionContextPaths after sending the message
-      setSessionContextPaths([]);
+      // Clear sessionFiles after sending the message
+      setSessionFiles([]);
     } else {
       // If nothing was actually submitted (e.g. empty input and no images pasted)
       window.electron.stopPowerSaveBlocker();
@@ -567,40 +545,57 @@ function ChatContent({
     const imageFiles = files.filter((file) => file.type.startsWith('image/'));
     const nonImageFiles = files.filter((file) => !file.type.startsWith('image/'));
 
-    // Handle non-image files first - add them to sessionContextPaths
+    // Handle non-image files first - add them to sessionFiles
     if (nonImageFiles.length > 0) {
-      const paths: string[] = [];
-      for (let i = 0; i < nonImageFiles.length; i++) {
-        paths.push(window.electron.getPathForFile(nonImageFiles[i]));
-      }
-      // Add dropped files to session context files instead of chat input
-      const newContextPaths = paths.filter(
-        (path) => !sessionContextPaths.some((fp) => fp.path === path)
-      );
-      if (newContextPaths.length > 0) {
-        // Detect the type of each path
-        const addContextPaths = async () => {
-          const newContextPathItems: ContextPathItem[] = [];
-          for (const path of newContextPaths) {
-            const pathType = await window.electron.getPathType(path);
-            newContextPathItems.push({ path, type: pathType });
+      const processNonImageFiles = async () => {
+        // Collect all new session files first
+        const newSessionFiles: SessionFile[] = [];
+
+        for (const file of nonImageFiles) {
+          try {
+            // Get the file path using the electron API
+            const filePath = window.electron.getPathForFile(file);
+            if (filePath) {
+              // Get the path type
+              const pathType = await window.electron.getPathType(filePath);
+
+              // Check if this path is already in sessionFiles
+              const isAlreadyAdded = sessionFiles.some((item) => item.path === filePath);
+
+              if (!isAlreadyAdded) {
+                const newSessionFile: SessionFile = {
+                  id: `file-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+                  path: filePath,
+                  type: pathType === 'directory' ? 'directory' : 'file',
+                };
+                newSessionFiles.push(newSessionFile);
+              }
+            }
+          } catch (error) {
+            console.error('Error processing dropped file:', error);
           }
-          setSessionContextPaths([...sessionContextPaths, ...newContextPathItems]);
-        };
-        addContextPaths();
-      }
+        }
+
+        // Update sessionFiles with all new items at once
+        if (newSessionFiles.length > 0) {
+          setSessionFiles([...sessionFiles, ...newSessionFiles]);
+        }
+      };
+      processNonImageFiles();
     }
 
     // Handle image files with the same logic as paste functionality
     if (imageFiles.length === 0) return;
 
     // Check if adding these images would exceed the limit
-    if (pastedImages.length + imageFiles.length > MAX_IMAGES_PER_MESSAGE) {
+    if (sessionFiles.length + imageFiles.length > MAX_IMAGES_PER_MESSAGE) {
       // Show error message to user
-      setPastedImages((prev) => [
+      setSessionFiles((prev) => [
         ...prev,
         {
           id: `error-${Date.now()}`,
+          path: '',
+          type: 'image',
           dataUrl: '',
           isLoading: false,
           error: `Cannot drop ${imageFiles.length} image(s). Maximum ${MAX_IMAGES_PER_MESSAGE} images per message allowed.`,
@@ -609,7 +604,7 @@ function ChatContent({
 
       // Remove the error message after 3 seconds
       setTimeout(() => {
-        setPastedImages((prev) => prev.filter((img) => !img.id.startsWith('error-')));
+        setSessionFiles((prev) => prev.filter((file) => !file.id.startsWith('error-')));
       }, 3000);
 
       return;
@@ -619,10 +614,12 @@ function ChatContent({
       // Check individual file size before processing
       if (file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024) {
         const errorId = `error-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-        setPastedImages((prev) => [
+        setSessionFiles((prev) => [
           ...prev,
           {
             id: errorId,
+            path: '',
+            type: 'image',
             dataUrl: '',
             isLoading: false,
             error: `Image too large (${Math.round(file.size / (1024 * 1024))}MB). Maximum ${MAX_IMAGE_SIZE_MB}MB allowed.`,
@@ -631,7 +628,7 @@ function ChatContent({
 
         // Remove the error message after 3 seconds
         setTimeout(() => {
-          setPastedImages((prev) => prev.filter((img) => img.id !== errorId));
+          setSessionFiles((prev) => prev.filter((file) => file.id !== errorId));
         }, 3000);
 
         continue;
@@ -642,24 +639,33 @@ function ChatContent({
         const dataUrl = e.target?.result as string;
         if (dataUrl) {
           const imageId = `img-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-          setPastedImages((prev) => [...prev, { id: imageId, dataUrl, isLoading: true }]);
+          setSessionFiles((prev) => [
+            ...prev,
+            {
+              id: imageId,
+              path: '',
+              type: 'image',
+              dataUrl,
+              isLoading: true,
+            },
+          ]);
 
           try {
             const result = await window.electron.saveDataUrlToTemp(dataUrl, imageId);
-            setPastedImages((prev) =>
-              prev.map((img) =>
-                img.id === result.id
-                  ? { ...img, filePath: result.filePath, error: result.error, isLoading: false }
-                  : img
+            setSessionFiles((prev) =>
+              prev.map((file) =>
+                file.id === result.id
+                  ? { ...file, path: result.filePath || '', error: result.error, isLoading: false }
+                  : file
               )
             );
           } catch (err) {
             console.error('Error saving dropped image:', err);
-            setPastedImages((prev) =>
-              prev.map((img) =>
-                img.id === imageId
-                  ? { ...img, error: 'Failed to save image via Electron.', isLoading: false }
-                  : img
+            setSessionFiles((prev) =>
+              prev.map((file) =>
+                file.id === imageId
+                  ? { ...file, error: 'Failed to save image via Electron.', isLoading: false }
+                  : file
               )
             );
           }
@@ -799,10 +805,8 @@ function ChatContent({
               numTokens={sessionTokenCount}
               messages={messages}
               setMessages={setMessages}
-              sessionContextPaths={sessionContextPaths}
-              setSessionContextPaths={setSessionContextPaths}
-              pastedImages={pastedImages}
-              setPastedImages={setPastedImages}
+              sessionFiles={sessionFiles}
+              setSessionFiles={setSessionFiles}
             />
           </div>
         </Card>

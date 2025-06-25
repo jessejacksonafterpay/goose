@@ -12,7 +12,6 @@ import {
   manageContext,
   Message as ApiMessage,
   MessageContent as ApiMessageContent,
-  ContextPathItem,
 } from '../../api';
 import { generateId } from 'ai';
 
@@ -121,14 +120,6 @@ function mapApiContentToFrontendMessageContent(
     return {
       type: 'summarizationRequested',
       msg: apiContent.msg,
-    };
-  } else if (apiContent.type === 'contextPaths') {
-    return {
-      type: 'contextPaths',
-      paths: apiContent.paths.map((pathItem: ContextPathItem) => ({
-        path: pathItem.path,
-        type: pathItem.type,
-      })),
     };
   }
 
