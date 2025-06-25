@@ -34,6 +34,8 @@ interface ChatInputProps {
   setMessages: (messages: Message[]) => void;
   sessionContextPaths?: ContextPathItem[];
   setSessionContextPaths?: (files: ContextPathItem[]) => void;
+  pastedImages?: PastedImage[];
+  setPastedImages?: (images: PastedImage[]) => void;
 }
 
 export default function ChatInput({
@@ -48,11 +50,22 @@ export default function ChatInput({
   setMessages,
   sessionContextPaths = [],
   setSessionContextPaths,
+  pastedImages = [],
+  setPastedImages,
 }: ChatInputProps) {
   const [_value, setValue] = useState(initialValue);
   const [displayValue, setDisplayValue] = useState(initialValue); // For immediate visual feedback
   const [isFocused, setIsFocused] = useState(false);
-  const [pastedImages, setPastedImages] = useState<PastedImage[]>([]);
+  const [internalPastedImages, setInternalPastedImages] = useState<PastedImage[]>([]);
+
+  // Use external pastedImages if provided, otherwise use internal state
+  const currentPastedImages = pastedImages || internalPastedImages;
+  const currentSetPastedImages = setPastedImages || setInternalPastedImages;
+
+  // Type assertion to fix the setState function type
+  const setPastedImagesFn = currentSetPastedImages as React.Dispatch<
+    React.SetStateAction<PastedImage[]>
+  >;
 
   // Update internal value when initialValue changes
   useEffect(() => {
@@ -61,8 +74,8 @@ export default function ChatInput({
 
     // Use a functional update to get the current pastedImages
     // and perform cleanup. This avoids needing pastedImages in the deps.
-    setPastedImages((currentPastedImages) => {
-      currentPastedImages.forEach((img) => {
+    setPastedImagesFn((currentPastedImages: PastedImage[]) => {
+      currentPastedImages.forEach((img: PastedImage) => {
         if (img.filePath) {
           window.electron.deleteTempFile(img.filePath);
         }
@@ -73,7 +86,7 @@ export default function ChatInput({
     // Reset history index when input is cleared
     setHistoryIndex(-1);
     setIsInGlobalHistory(false);
-  }, [initialValue]); // Keep only initialValue as a dependency
+  }, [initialValue, setPastedImagesFn]); // Keep only initialValue as a dependency
 
   // State to track if the IME is composing (i.e., in the middle of Japanese IME input)
   const [isComposing, setIsComposing] = useState(false);
@@ -83,26 +96,30 @@ export default function ChatInput({
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleRemovePastedImage = (idToRemove: string) => {
-    const imageToRemove = pastedImages.find((img) => img.id === idToRemove);
+    const imageToRemove = currentPastedImages.find((img) => img.id === idToRemove);
     if (imageToRemove?.filePath) {
       window.electron.deleteTempFile(imageToRemove.filePath);
     }
-    setPastedImages((currentImages) => currentImages.filter((img) => img.id !== idToRemove));
+    setPastedImagesFn((currentImages: PastedImage[]) =>
+      currentImages.filter((img: PastedImage) => img.id !== idToRemove)
+    );
   };
 
   const handleRetryImageSave = async (imageId: string) => {
-    const imageToRetry = pastedImages.find((img) => img.id === imageId);
+    const imageToRetry = currentPastedImages.find((img) => img.id === imageId);
     if (!imageToRetry || !imageToRetry.dataUrl) return;
 
     // Set the image to loading state
-    setPastedImages((prev) =>
-      prev.map((img) => (img.id === imageId ? { ...img, isLoading: true, error: undefined } : img))
+    setPastedImagesFn((prev: PastedImage[]) =>
+      prev.map((img: PastedImage) =>
+        img.id === imageId ? { ...img, isLoading: true, error: undefined } : img
+      )
     );
 
     try {
       const result = await window.electron.saveDataUrlToTemp(imageToRetry.dataUrl, imageId);
-      setPastedImages((prev) =>
-        prev.map((img) =>
+      setPastedImagesFn((prev: PastedImage[]) =>
+        prev.map((img: PastedImage) =>
           img.id === result.id
             ? { ...img, filePath: result.filePath, error: result.error, isLoading: false }
             : img
@@ -110,8 +127,8 @@ export default function ChatInput({
       );
     } catch (err) {
       console.error('Error retrying image save:', err);
-      setPastedImages((prev) =>
-        prev.map((img) =>
+      setPastedImagesFn((prev: PastedImage[]) =>
+        prev.map((img: PastedImage) =>
           img.id === imageId
             ? { ...img, error: 'Failed to save image via Electron.', isLoading: false }
             : img
@@ -173,38 +190,41 @@ export default function ChatInput({
 
     // Handle non-image files first - add them to sessionContextPaths
     if (nonImageFiles.length > 0 && setSessionContextPaths) {
-      for (const file of nonImageFiles) {
-        try {
-          // Get the file path using the electron API
-          const filePath = window.electron.getPathForFile(file);
-          if (filePath) {
-            // Get the path type
-            const pathType = await window.electron.getPathType(filePath);
+      const processNonImageFiles = async () => {
+        for (const file of nonImageFiles) {
+          try {
+            // Get the file path using the electron API
+            const filePath = window.electron.getPathForFile(file);
+            if (filePath) {
+              // Get the path type
+              const pathType = await window.electron.getPathType(filePath);
 
-            // Check if this path is already in sessionContextPaths
-            const isAlreadyAdded = sessionContextPaths.some((item) => item.path === filePath);
+              // Check if this path is already in sessionContextPaths
+              const isAlreadyAdded = sessionContextPaths.some((item) => item.path === filePath);
 
-            if (!isAlreadyAdded) {
-              const newContextPath: ContextPathItem = {
-                path: filePath,
-                type: pathType,
-              };
-              setSessionContextPaths([...sessionContextPaths, newContextPath]);
+              if (!isAlreadyAdded) {
+                const newContextPath: ContextPathItem = {
+                  path: filePath,
+                  type: pathType,
+                };
+                setSessionContextPaths([...sessionContextPaths, newContextPath]);
+              }
             }
+          } catch (error) {
+            console.error('Error processing dropped file:', error);
           }
-        } catch (error) {
-          console.error('Error processing pasted file:', error);
         }
-      }
+      };
+      processNonImageFiles();
     }
 
     // Handle image files with existing functionality
     if (imageFiles.length === 0) return;
 
     // Check if adding these images would exceed the limit
-    if (pastedImages.length + imageFiles.length > MAX_IMAGES_PER_MESSAGE) {
+    if (currentPastedImages.length + imageFiles.length > MAX_IMAGES_PER_MESSAGE) {
       // Show error message to user
-      setPastedImages((prev) => [
+      setPastedImagesFn((prev) => [
         ...prev,
         {
           id: `error-${Date.now()}`,
@@ -216,7 +236,7 @@ export default function ChatInput({
 
       // Remove the error message after 3 seconds
       setTimeout(() => {
-        setPastedImages((prev) => prev.filter((img) => !img.id.startsWith('error-')));
+        setPastedImagesFn((prev) => prev.filter((img) => !img.id.startsWith('error-')));
       }, 3000);
 
       return;
@@ -226,7 +246,7 @@ export default function ChatInput({
       // Check individual file size before processing
       if (file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024) {
         const errorId = `error-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-        setPastedImages((prev) => [
+        setPastedImagesFn((prev) => [
           ...prev,
           {
             id: errorId,
@@ -238,7 +258,7 @@ export default function ChatInput({
 
         // Remove the error message after 3 seconds
         setTimeout(() => {
-          setPastedImages((prev) => prev.filter((img) => img.id !== errorId));
+          setPastedImagesFn((prev) => prev.filter((img) => img.id !== errorId));
         }, 3000);
 
         continue;
@@ -249,11 +269,11 @@ export default function ChatInput({
         const dataUrl = e.target?.result as string;
         if (dataUrl) {
           const imageId = `img-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-          setPastedImages((prev) => [...prev, { id: imageId, dataUrl, isLoading: true }]);
+          setPastedImagesFn((prev) => [...prev, { id: imageId, dataUrl, isLoading: true }]);
 
           try {
             const result = await window.electron.saveDataUrlToTemp(dataUrl, imageId);
-            setPastedImages((prev) =>
+            setPastedImagesFn((prev) =>
               prev.map((img) =>
                 img.id === result.id
                   ? { ...img, filePath: result.filePath, error: result.error, isLoading: false }
@@ -262,7 +282,7 @@ export default function ChatInput({
             );
           } catch (err) {
             console.error('Error saving pasted image:', err);
-            setPastedImages((prev) =>
+            setPastedImagesFn((prev) =>
               prev.map((img) =>
                 img.id === imageId
                   ? { ...img, error: 'Failed to save image via Electron.', isLoading: false }
@@ -363,7 +383,7 @@ export default function ChatInput({
   };
 
   const performSubmit = () => {
-    const validPastedImageFilesPaths = pastedImages
+    const validPastedImageFilesPaths = currentPastedImages
       .filter((img) => img.filePath && !img.error && !img.isLoading)
       .map((img) => img.filePath as string);
 
@@ -392,7 +412,7 @@ export default function ChatInput({
 
       setDisplayValue('');
       setValue('');
-      setPastedImages([]);
+      setPastedImagesFn([]);
       setHistoryIndex(-1);
       setSavedInput('');
       setIsInGlobalHistory(false);
@@ -421,7 +441,7 @@ export default function ChatInput({
       const canSubmit =
         !isLoading &&
         (displayValue.trim() ||
-          pastedImages.some((img) => img.filePath && !img.error && !img.isLoading));
+          currentPastedImages.some((img) => img.filePath && !img.error && !img.isLoading));
       if (canSubmit) {
         performSubmit();
       }
@@ -433,15 +453,16 @@ export default function ChatInput({
     const canSubmit =
       !isLoading &&
       (displayValue.trim() ||
-        pastedImages.some((img) => img.filePath && !img.error && !img.isLoading));
+        currentPastedImages.some((img) => img.filePath && !img.error && !img.isLoading));
     if (canSubmit) {
       performSubmit();
     }
   };
 
   const hasSubmittableContent =
-    displayValue.trim() || pastedImages.some((img) => img.filePath && !img.error && !img.isLoading);
-  const isAnyImageLoading = pastedImages.some((img) => img.isLoading);
+    displayValue.trim() ||
+    currentPastedImages.some((img) => img.filePath && !img.error && !img.isLoading);
+  const isAnyImageLoading = currentPastedImages.some((img) => img.isLoading);
 
   // Context menu state and handlers
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
@@ -516,9 +537,9 @@ export default function ChatInput({
             if (isImageFile) {
               // Handle image files like pasted images
               // Check if adding this image would exceed the limit
-              if (pastedImages.length + 1 > MAX_IMAGES_PER_MESSAGE) {
+              if (currentPastedImages.length + 1 > MAX_IMAGES_PER_MESSAGE) {
                 // Show error message to user
-                setPastedImages((prev) => [
+                setPastedImagesFn((prev) => [
                   ...prev,
                   {
                     id: `error-${Date.now()}`,
@@ -530,7 +551,7 @@ export default function ChatInput({
 
                 // Remove the error message after 3 seconds
                 setTimeout(() => {
-                  setPastedImages((prev) => prev.filter((img) => !img.id.startsWith('error-')));
+                  setPastedImagesFn((prev) => prev.filter((img) => !img.id.startsWith('error-')));
                 }, 3000);
 
                 continue;
@@ -541,11 +562,11 @@ export default function ChatInput({
                 const dataUrl = await window.electron.readImageFile(filePath);
                 if (dataUrl) {
                   const imageId = `img-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-                  setPastedImages((prev) => [...prev, { id: imageId, dataUrl, isLoading: true }]);
+                  setPastedImagesFn((prev) => [...prev, { id: imageId, dataUrl, isLoading: true }]);
 
                   try {
                     const result = await window.electron.saveDataUrlToTemp(dataUrl, imageId);
-                    setPastedImages((prev) =>
+                    setPastedImagesFn((prev) =>
                       prev.map((img) =>
                         img.id === result.id
                           ? {
@@ -559,7 +580,7 @@ export default function ChatInput({
                     );
                   } catch (err) {
                     console.error('Error saving selected image:', err);
-                    setPastedImages((prev) =>
+                    setPastedImagesFn((prev) =>
                       prev.map((img) =>
                         img.id === imageId
                           ? {
@@ -574,7 +595,7 @@ export default function ChatInput({
                 } else {
                   // Show error message for unsupported or invalid image
                   const errorId = `error-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-                  setPastedImages((prev) => [
+                  setPastedImagesFn((prev) => [
                     ...prev,
                     {
                       id: errorId,
@@ -587,13 +608,13 @@ export default function ChatInput({
 
                   // Remove the error message after 3 seconds
                   setTimeout(() => {
-                    setPastedImages((prev) => prev.filter((img) => img.id !== errorId));
+                    setPastedImagesFn((prev) => prev.filter((img) => img.id !== errorId));
                   }, 3000);
                 }
               } catch (err) {
                 console.error('Error reading image file:', filePath, err);
                 const errorId = `error-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-                setPastedImages((prev) => [
+                setPastedImagesFn((prev) => [
                   ...prev,
                   {
                     id: errorId,
@@ -605,7 +626,7 @@ export default function ChatInput({
 
                 // Remove the error message after 3 seconds
                 setTimeout(() => {
-                  setPastedImages((prev) => prev.filter((img) => img.id !== errorId));
+                  setPastedImagesFn((prev) => prev.filter((img) => img.id !== errorId));
                 }, 3000);
               }
             } else {
@@ -635,6 +656,124 @@ export default function ChatInput({
     }
   };
 
+  const handleDrop = (evt: React.DragEvent<HTMLDivElement>) => {
+    evt.preventDefault();
+    const files = Array.from(evt.dataTransfer.files);
+    const imageFiles = files.filter((file) => file.type.startsWith('image/'));
+    const nonImageFiles = files.filter((file) => !file.type.startsWith('image/'));
+
+    // Handle non-image files first - add them to sessionContextPaths
+    if (nonImageFiles.length > 0 && setSessionContextPaths) {
+      const processNonImageFiles = async () => {
+        for (const file of nonImageFiles) {
+          try {
+            // Get the file path using the electron API
+            const filePath = window.electron.getPathForFile(file);
+            if (filePath) {
+              // Get the path type
+              const pathType = await window.electron.getPathType(filePath);
+
+              // Check if this path is already in sessionContextPaths
+              const isAlreadyAdded = sessionContextPaths.some((item) => item.path === filePath);
+
+              if (!isAlreadyAdded) {
+                const newContextPath: ContextPathItem = {
+                  path: filePath,
+                  type: pathType,
+                };
+                setSessionContextPaths([...sessionContextPaths, newContextPath]);
+              }
+            }
+          } catch (error) {
+            console.error('Error processing dropped file:', error);
+          }
+        }
+      };
+      processNonImageFiles();
+    }
+
+    // Handle image files with the same logic as paste functionality
+    if (imageFiles.length === 0) return;
+
+    // Check if adding these images would exceed the limit
+    if (currentPastedImages.length + imageFiles.length > MAX_IMAGES_PER_MESSAGE) {
+      // Show error message to user
+      setPastedImagesFn((prev) => [
+        ...prev,
+        {
+          id: `error-${Date.now()}`,
+          dataUrl: '',
+          isLoading: false,
+          error: `Cannot drop ${imageFiles.length} image(s). Maximum ${MAX_IMAGES_PER_MESSAGE} images per message allowed.`,
+        },
+      ]);
+
+      // Remove the error message after 3 seconds
+      setTimeout(() => {
+        setPastedImagesFn((prev) => prev.filter((img) => !img.id.startsWith('error-')));
+      }, 3000);
+
+      return;
+    }
+
+    for (const file of imageFiles) {
+      // Check individual file size before processing
+      if (file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024) {
+        const errorId = `error-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        setPastedImagesFn((prev) => [
+          ...prev,
+          {
+            id: errorId,
+            dataUrl: '',
+            isLoading: false,
+            error: `Image too large (${Math.round(file.size / (1024 * 1024))}MB). Maximum ${MAX_IMAGE_SIZE_MB}MB allowed.`,
+          },
+        ]);
+
+        // Remove the error message after 3 seconds
+        setTimeout(() => {
+          setPastedImagesFn((prev) => prev.filter((img) => img.id !== errorId));
+        }, 3000);
+
+        continue;
+      }
+
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const dataUrl = e.target?.result as string;
+        if (dataUrl) {
+          const imageId = `img-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+          setPastedImagesFn((prev) => [...prev, { id: imageId, dataUrl, isLoading: true }]);
+
+          try {
+            const result = await window.electron.saveDataUrlToTemp(dataUrl, imageId);
+            setPastedImagesFn((prev) =>
+              prev.map((img) =>
+                img.id === result.id
+                  ? { ...img, filePath: result.filePath, error: result.error, isLoading: false }
+                  : img
+              )
+            );
+          } catch (err) {
+            console.error('Error saving dropped image:', err);
+            setPastedImagesFn((prev) =>
+              prev.map((img) =>
+                img.id === imageId
+                  ? { ...img, error: 'Failed to save image via Electron.', isLoading: false }
+                  : img
+              )
+            );
+          }
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleDragOver = (evt: React.DragEvent<HTMLDivElement>) => {
+    evt.preventDefault();
+  };
+
   return (
     <div
       className={`flex flex-col relative h-auto border rounded-lg transition-colors ${
@@ -642,6 +781,8 @@ export default function ChatInput({
           ? 'border-borderProminent hover:border-borderProminent'
           : 'border-borderSubtle hover:border-borderStandard'
       } bg-bgApp z-10`}
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
     >
       <form onSubmit={onFormSubmit}>
         <textarea
@@ -667,9 +808,9 @@ export default function ChatInput({
           className="w-full pl-4 pr-[68px] outline-none border-none focus:ring-0 bg-transparent pt-3 pb-1.5 text-sm resize-none text-textStandard placeholder:text-textPlaceholder"
         />
 
-        {pastedImages.length > 0 && (
+        {currentPastedImages.length > 0 && (
           <div className="flex flex-wrap gap-2 p-2 border-t border-borderSubtle">
-            {pastedImages.map((img) => (
+            {currentPastedImages.map((img) => (
               <div key={img.id} className="relative group w-20 h-20">
                 {img.dataUrl && (
                   <img

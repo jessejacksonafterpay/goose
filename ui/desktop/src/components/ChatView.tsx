@@ -46,6 +46,19 @@ import {
   ContextPathItem,
 } from '../types/message';
 
+// Image handling interfaces and constants
+interface PastedImage {
+  id: string;
+  dataUrl: string; // For immediate preview
+  filePath?: string; // Path on filesystem after saving
+  isLoading: boolean;
+  error?: string;
+}
+
+// Constants for image handling
+const MAX_IMAGES_PER_MESSAGE = 5;
+const MAX_IMAGE_SIZE_MB = 5;
+
 // Context for sharing current model info
 const CurrentModelContext = createContext<{ model: string; mode: string } | null>(null);
 export const useCurrentModelInfo = () => useContext(CurrentModelContext);
@@ -110,6 +123,7 @@ function ChatContent({
   const [ancestorMessages, setAncestorMessages] = useState<Message[]>([]);
   const [readyForAutoUserPrompt, setReadyForAutoUserPrompt] = useState(false);
   const [sessionContextPaths, setSessionContextPaths] = useState<ContextPathItem[]>([]);
+  const [pastedImages, setPastedImages] = useState<PastedImage[]>([]);
 
   const scrollRef = useRef<ScrollAreaHandle>(null);
 
@@ -564,13 +578,26 @@ function ChatContent({
     }
   }, [chat.id, messages]);
 
+  const toolCallNotifications = notifications.reduce((map, item) => {
+    const key = item.request_id;
+    if (!map.has(key)) {
+      map.set(key, []);
+    }
+    map.get(key).push(item);
+    return map;
+  }, new Map());
+
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
+    const files = Array.from(e.dataTransfer.files);
+    const imageFiles = files.filter((file) => file.type.startsWith('image/'));
+    const nonImageFiles = files.filter((file) => !file.type.startsWith('image/'));
+
+    // Handle non-image files first - add them to sessionContextPaths
+    if (nonImageFiles.length > 0) {
       const paths: string[] = [];
-      for (let i = 0; i < files.length; i++) {
-        paths.push(window.electron.getPathForFile(files[i]));
+      for (let i = 0; i < nonImageFiles.length; i++) {
+        paths.push(window.electron.getPathForFile(nonImageFiles[i]));
       }
       // Add dropped files to session context files instead of chat input
       const newContextPaths = paths.filter(
@@ -589,20 +616,88 @@ function ChatContent({
         addContextPaths();
       }
     }
+
+    // Handle image files with the same logic as paste functionality
+    if (imageFiles.length === 0) return;
+
+    // Check if adding these images would exceed the limit
+    if (pastedImages.length + imageFiles.length > MAX_IMAGES_PER_MESSAGE) {
+      // Show error message to user
+      setPastedImages((prev) => [
+        ...prev,
+        {
+          id: `error-${Date.now()}`,
+          dataUrl: '',
+          isLoading: false,
+          error: `Cannot drop ${imageFiles.length} image(s). Maximum ${MAX_IMAGES_PER_MESSAGE} images per message allowed.`,
+        },
+      ]);
+
+      // Remove the error message after 3 seconds
+      setTimeout(() => {
+        setPastedImages((prev) => prev.filter((img) => !img.id.startsWith('error-')));
+      }, 3000);
+
+      return;
+    }
+
+    for (const file of imageFiles) {
+      // Check individual file size before processing
+      if (file.size > MAX_IMAGE_SIZE_MB * 1024 * 1024) {
+        const errorId = `error-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        setPastedImages((prev) => [
+          ...prev,
+          {
+            id: errorId,
+            dataUrl: '',
+            isLoading: false,
+            error: `Image too large (${Math.round(file.size / (1024 * 1024))}MB). Maximum ${MAX_IMAGE_SIZE_MB}MB allowed.`,
+          },
+        ]);
+
+        // Remove the error message after 3 seconds
+        setTimeout(() => {
+          setPastedImages((prev) => prev.filter((img) => img.id !== errorId));
+        }, 3000);
+
+        continue;
+      }
+
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const dataUrl = e.target?.result as string;
+        if (dataUrl) {
+          const imageId = `img-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+          setPastedImages((prev) => [...prev, { id: imageId, dataUrl, isLoading: true }]);
+
+          try {
+            const result = await window.electron.saveDataUrlToTemp(dataUrl, imageId);
+            setPastedImages((prev) =>
+              prev.map((img) =>
+                img.id === result.id
+                  ? { ...img, filePath: result.filePath, error: result.error, isLoading: false }
+                  : img
+              )
+            );
+          } catch (err) {
+            console.error('Error saving dropped image:', err);
+            setPastedImages((prev) =>
+              prev.map((img) =>
+                img.id === imageId
+                  ? { ...img, error: 'Failed to save image via Electron.', isLoading: false }
+                  : img
+              )
+            );
+          }
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
   };
-
-  const toolCallNotifications = notifications.reduce((map, item) => {
-    const key = item.request_id;
-    if (!map.has(key)) {
-      map.set(key, []);
-    }
-    map.get(key).push(item);
-    return map;
-  }, new Map());
 
   return (
     <CurrentModelContext.Provider value={currentModelInfo}>
@@ -732,6 +827,8 @@ function ChatContent({
               setMessages={setMessages}
               sessionContextPaths={sessionContextPaths}
               setSessionContextPaths={setSessionContextPaths}
+              pastedImages={pastedImages}
+              setPastedImages={setPastedImages}
             />
           </div>
         </Card>
