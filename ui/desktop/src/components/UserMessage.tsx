@@ -4,7 +4,12 @@ import ImagePreview from './ImagePreview';
 import { extractUrls } from '../utils/urlUtils';
 import { extractImagePaths, removeImagePathsFromText } from '../utils/imageUtils';
 import MarkdownContent from './MarkdownContent';
-import { Message, getTextContent, getSessionFilesFromMessage } from '../types/message';
+import {
+  Message,
+  getTextContent,
+  getSessionFilesFromMessage,
+  ImageContent,
+} from '../types/message';
 import MessageCopyLink from './MessageCopyLink';
 import { formatMessageTimestamp } from '../utils/timeUtils';
 import { Document } from './icons';
@@ -20,7 +25,7 @@ export default function UserMessage({ message }: UserMessageProps) {
   // Extract text content from the message
   const textContent = getTextContent(message);
 
-  // Extract image paths from the message
+  // Extract image paths from the message (fallback for old format)
   const imagePaths = extractImagePaths(textContent);
 
   // Remove image paths from text for display
@@ -28,6 +33,19 @@ export default function UserMessage({ message }: UserMessageProps) {
 
   // Extract session files from the message
   const sessionFiles = getSessionFilesFromMessage(message);
+
+  // Extract images from ImageContent objects in the message
+  const imageContents = message.content.filter(
+    (content): content is ImageContent => content.type === 'image'
+  );
+
+  // Convert ImageContent objects to data URLs for display
+  const imageDataUrls = imageContents.map(
+    (imageContent) => `data:${imageContent.mimeType};base64,${imageContent.data}`
+  );
+
+  // Combine both image sources (new ImageContent and old image paths)
+  const allImages = [...imageDataUrls, ...imagePaths];
 
   // Memoize the timestamp
   const timestamp = useMemo(() => formatMessageTimestamp(message.created), [message.created]);
@@ -73,10 +91,10 @@ export default function UserMessage({ message }: UserMessageProps) {
           )}
 
           {/* Render images if any */}
-          {imagePaths.length > 0 && (
+          {allImages.length > 0 && (
             <div className="flex flex-wrap gap-2 mt-2">
-              {imagePaths.map((imagePath, index) => (
-                <ImagePreview key={index} src={imagePath} alt={`Pasted image ${index + 1}`} />
+              {allImages.map((imageSrc, index) => (
+                <ImagePreview key={index} src={imageSrc} alt={`Pasted image ${index + 1}`} />
               ))}
             </div>
           )}

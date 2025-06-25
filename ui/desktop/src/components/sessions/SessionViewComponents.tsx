@@ -12,6 +12,7 @@ import {
   ToolResponseMessageContent,
   Message,
   getTextContent,
+  ImageContent,
 } from '../../types/message';
 import { formatMessageTimestamp } from '../../utils/timeUtils';
 import { extractImagePaths, removeImagePathsFromText } from '../../utils/imageUtils';
@@ -114,11 +115,24 @@ export const SessionMessages: React.FC<SessionMessagesProps> = ({
                   // Extract text content from the message
                   const textContent = getTextContent(message);
 
-                  // Extract image paths from the message
+                  // Extract image paths from the message (fallback for old format)
                   const imagePaths = extractImagePaths(textContent);
 
                   // Remove image paths from text for display
                   let displayText = removeImagePathsFromText(textContent, imagePaths);
+
+                  // Extract images from ImageContent objects in the message
+                  const imageContents = message.content.filter(
+                    (content): content is ImageContent => content.type === 'image'
+                  );
+
+                  // Convert ImageContent objects to data URLs for display
+                  const imageDataUrls = imageContents.map(
+                    (imageContent) => `data:${imageContent.mimeType};base64,${imageContent.data}`
+                  );
+
+                  // Combine both image sources (new ImageContent and old image paths)
+                  const allImages = [...imageDataUrls, ...imagePaths];
 
                   // Get tool requests from the message
                   const toolRequests = message.content
@@ -159,19 +173,19 @@ export const SessionMessages: React.FC<SessionMessagesProps> = ({
                         {/* Text content */}
                         {displayText && (
                           <div
-                            className={`${toolRequests.length > 0 || imagePaths.length > 0 ? 'mb-4' : ''}`}
+                            className={`${toolRequests.length > 0 || allImages.length > 0 ? 'mb-4' : ''}`}
                           >
                             <MarkdownContent content={displayText} />
                           </div>
                         )}
 
                         {/* Render images if any */}
-                        {imagePaths.length > 0 && (
+                        {allImages.length > 0 && (
                           <div className="flex flex-wrap gap-2 mt-2 mb-2">
-                            {imagePaths.map((imagePath, imageIndex) => (
+                            {allImages.map((imageSrc, imageIndex) => (
                               <ImagePreview
                                 key={imageIndex}
-                                src={imagePath}
+                                src={imageSrc}
                                 alt={`Image ${imageIndex + 1}`}
                               />
                             ))}

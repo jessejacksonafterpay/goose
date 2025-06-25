@@ -127,9 +127,29 @@ export function createUserMessage(text: string, sessionFiles: SessionFile[] = []
     content.push({ type: 'text', text: text.trim() });
   }
 
-  // Add session files content only if there are session files
-  if (sessionFiles.length > 0) {
-    content.push({ type: 'sessionFiles', files: sessionFiles });
+  // Separate images from other session files
+  const imageFiles = sessionFiles.filter((file) => file.type === 'image');
+  const nonImageFiles = sessionFiles.filter((file) => file.type !== 'image');
+
+  // Add image content for each image file
+  for (const imageFile of imageFiles) {
+    if (imageFile.dataUrl && !imageFile.error && !imageFile.isLoading) {
+      // Extract the base64 data and mime type from the data URL
+      const dataUrlMatch = imageFile.dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (dataUrlMatch) {
+        const [, mimeType, base64Data] = dataUrlMatch;
+        content.push({
+          type: 'image',
+          data: base64Data,
+          mimeType: mimeType,
+        });
+      }
+    }
+  }
+
+  // Add session files content only if there are non-image session files
+  if (nonImageFiles.length > 0) {
+    content.push({ type: 'sessionFiles', files: nonImageFiles });
   }
 
   return {
