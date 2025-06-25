@@ -503,19 +503,129 @@ export default function ChatInput({
   const handleSelectFilesAndFolders = async () => {
     try {
       const filePaths = await window.electron.selectMultipleFiles();
-      if (filePaths.length > 0 && setSessionContextPaths) {
-        // Add only files that aren't already selected
-        const newFiles = filePaths.filter(
-          (filePath) => !sessionContextPaths.some((fp) => fp.path === filePath)
-        );
-        if (newFiles.length > 0) {
-          // Detect the type of each path
-          const newContextPaths: ContextPathItem[] = [];
-          for (const filePath of newFiles) {
+      if (filePaths.length > 0) {
+        // Process each file path
+        for (const filePath of filePaths) {
+          try {
+            // Get the path type
             const pathType = await window.electron.getPathType(filePath);
-            newContextPaths.push({ path: filePath, type: pathType });
+
+            // Check if this is an image file by examining the file extension
+            const isImageFile = /\.(jpg|jpeg|png|gif|bmp|webp|svg|ico|tiff|tif)$/i.test(filePath);
+
+            if (isImageFile) {
+              // Handle image files like pasted images
+              // Check if adding this image would exceed the limit
+              if (pastedImages.length + 1 > MAX_IMAGES_PER_MESSAGE) {
+                // Show error message to user
+                setPastedImages((prev) => [
+                  ...prev,
+                  {
+                    id: `error-${Date.now()}`,
+                    dataUrl: '',
+                    isLoading: false,
+                    error: `Cannot add image. Maximum ${MAX_IMAGES_PER_MESSAGE} images per message allowed.`,
+                  },
+                ]);
+
+                // Remove the error message after 3 seconds
+                setTimeout(() => {
+                  setPastedImages((prev) => prev.filter((img) => !img.id.startsWith('error-')));
+                }, 3000);
+
+                continue;
+              }
+
+              // Read the image file and convert to data URL using the Electron API
+              try {
+                const dataUrl = await window.electron.readImageFile(filePath);
+                if (dataUrl) {
+                  const imageId = `img-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+                  setPastedImages((prev) => [...prev, { id: imageId, dataUrl, isLoading: true }]);
+
+                  try {
+                    const result = await window.electron.saveDataUrlToTemp(dataUrl, imageId);
+                    setPastedImages((prev) =>
+                      prev.map((img) =>
+                        img.id === result.id
+                          ? {
+                              ...img,
+                              filePath: result.filePath,
+                              error: result.error,
+                              isLoading: false,
+                            }
+                          : img
+                      )
+                    );
+                  } catch (err) {
+                    console.error('Error saving selected image:', err);
+                    setPastedImages((prev) =>
+                      prev.map((img) =>
+                        img.id === imageId
+                          ? {
+                              ...img,
+                              error: 'Failed to save image via Electron.',
+                              isLoading: false,
+                            }
+                          : img
+                      )
+                    );
+                  }
+                } else {
+                  // Show error message for unsupported or invalid image
+                  const errorId = `error-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+                  setPastedImages((prev) => [
+                    ...prev,
+                    {
+                      id: errorId,
+                      dataUrl: '',
+                      isLoading: false,
+                      error:
+                        'Unable to read image file. File may be unsupported, too large, or corrupted.',
+                    },
+                  ]);
+
+                  // Remove the error message after 3 seconds
+                  setTimeout(() => {
+                    setPastedImages((prev) => prev.filter((img) => img.id !== errorId));
+                  }, 3000);
+                }
+              } catch (err) {
+                console.error('Error reading image file:', filePath, err);
+                const errorId = `error-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+                setPastedImages((prev) => [
+                  ...prev,
+                  {
+                    id: errorId,
+                    dataUrl: '',
+                    isLoading: false,
+                    error: 'Failed to read image file.',
+                  },
+                ]);
+
+                // Remove the error message after 3 seconds
+                setTimeout(() => {
+                  setPastedImages((prev) => prev.filter((img) => img.id !== errorId));
+                }, 3000);
+              }
+            } else {
+              // Handle non-image files - add them to sessionContextPaths (existing behavior)
+              if (setSessionContextPaths) {
+                // Check if this path is already in sessionContextPaths
+                const isAlreadyAdded = sessionContextPaths.some((item) => item.path === filePath);
+
+                if (!isAlreadyAdded) {
+                  const newContextPath: ContextPathItem = {
+                    path: filePath,
+                    type: pathType,
+                  };
+                  setSessionContextPaths([...sessionContextPaths, newContextPath]);
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error processing selected file:', filePath, error);
           }
-          setSessionContextPaths([...sessionContextPaths, ...newContextPaths]);
         }
       }
       setIsContextMenuOpen(false);
