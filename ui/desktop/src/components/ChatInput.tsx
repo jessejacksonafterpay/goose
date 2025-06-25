@@ -164,7 +164,41 @@ export default function ChatInput({
   const handlePaste = async (evt: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(evt.clipboardData.files || []);
     const imageFiles = files.filter((file) => file.type.startsWith('image/'));
+    const nonImageFiles = files.filter((file) => !file.type.startsWith('image/'));
 
+    // If there are any files (image or non-image), prevent default paste behavior
+    if (files.length > 0) {
+      evt.preventDefault();
+    }
+
+    // Handle non-image files first - add them to sessionContextPaths
+    if (nonImageFiles.length > 0 && setSessionContextPaths) {
+      for (const file of nonImageFiles) {
+        try {
+          // Get the file path using the electron API
+          const filePath = window.electron.getPathForFile(file);
+          if (filePath) {
+            // Get the path type
+            const pathType = await window.electron.getPathType(filePath);
+
+            // Check if this path is already in sessionContextPaths
+            const isAlreadyAdded = sessionContextPaths.some((item) => item.path === filePath);
+
+            if (!isAlreadyAdded) {
+              const newContextPath: ContextPathItem = {
+                path: filePath,
+                type: pathType,
+              };
+              setSessionContextPaths([...sessionContextPaths, newContextPath]);
+            }
+          }
+        } catch (error) {
+          console.error('Error processing pasted file:', error);
+        }
+      }
+    }
+
+    // Handle image files with existing functionality
     if (imageFiles.length === 0) return;
 
     // Check if adding these images would exceed the limit
@@ -187,8 +221,6 @@ export default function ChatInput({
 
       return;
     }
-
-    evt.preventDefault();
 
     for (const file of imageFiles) {
       // Check individual file size before processing
