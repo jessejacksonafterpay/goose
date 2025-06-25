@@ -394,11 +394,18 @@ export default function ChatInput({
       textToSend = textToSend ? `${textToSend} ${pathsString}` : pathsString;
     }
 
-    if (textToSend) {
+    // Allow submission if there's text, images, or context paths
+    const hasContextPaths = sessionContextPaths.length > 0;
+    const hasContent = textToSend || hasContextPaths;
+
+    if (hasContent) {
       if (displayValue.trim()) {
         LocalMessageStorage.addMessage(displayValue);
       } else if (validPastedImageFilesPaths.length > 0) {
         LocalMessageStorage.addMessage(validPastedImageFilesPaths.join(' '));
+      } else if (hasContextPaths) {
+        // Add context paths to message history if no text or images
+        LocalMessageStorage.addMessage(`Added ${sessionContextPaths.length} file(s) to context`);
       }
 
       handleSubmit(
@@ -441,7 +448,8 @@ export default function ChatInput({
       const canSubmit =
         !isLoading &&
         (displayValue.trim() ||
-          currentPastedImages.some((img) => img.filePath && !img.error && !img.isLoading));
+          currentPastedImages.some((img) => img.filePath && !img.error && !img.isLoading) ||
+          sessionContextPaths.length > 0);
       if (canSubmit) {
         performSubmit();
       }
@@ -453,7 +461,8 @@ export default function ChatInput({
     const canSubmit =
       !isLoading &&
       (displayValue.trim() ||
-        currentPastedImages.some((img) => img.filePath && !img.error && !img.isLoading));
+        currentPastedImages.some((img) => img.filePath && !img.error && !img.isLoading) ||
+        sessionContextPaths.length > 0);
     if (canSubmit) {
       performSubmit();
     }
@@ -461,7 +470,8 @@ export default function ChatInput({
 
   const hasSubmittableContent =
     displayValue.trim() ||
-    currentPastedImages.some((img) => img.filePath && !img.error && !img.isLoading);
+    currentPastedImages.some((img) => img.filePath && !img.error && !img.isLoading) ||
+    sessionContextPaths.length > 0;
   const isAnyImageLoading = currentPastedImages.some((img) => img.isLoading);
 
   // Context menu state and handlers

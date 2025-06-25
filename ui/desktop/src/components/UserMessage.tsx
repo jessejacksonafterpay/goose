@@ -7,6 +7,8 @@ import MarkdownContent from './MarkdownContent';
 import { Message, getTextContent } from '../types/message';
 import MessageCopyLink from './MessageCopyLink';
 import { formatMessageTimestamp } from '../utils/timeUtils';
+import { Document } from './icons';
+import { FolderOpen } from 'lucide-react';
 
 interface UserMessageProps {
   message: Message;
@@ -23,6 +25,11 @@ export default function UserMessage({ message }: UserMessageProps) {
 
   // Remove image paths from text for display
   const displayText = removeImagePathsFromText(textContent, imagePaths);
+
+  // Extract context paths from the message
+  const contextPaths = message.content
+    .filter((content) => content.type === 'contextPaths')
+    .flatMap((content) => content.paths);
 
   // Memoize the timestamp
   const timestamp = useMemo(() => formatMessageTimestamp(message.created), [message.created]);
@@ -43,6 +50,27 @@ export default function UserMessage({ message }: UserMessageProps) {
                   className="text-white prose-a:text-white user-message"
                 />
               </div>
+            </div>
+          )}
+
+          {/* Render context paths if any */}
+          {contextPaths.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {contextPaths.map((contextPath, index) => (
+                <div
+                  key={`${contextPath.path}-${index}`}
+                  className="flex items-center gap-1 px-2 py-1 bg-bgSubtle border border-borderSubtle rounded-full text-xs text-textStandard"
+                >
+                  {contextPath.type === 'directory' ? (
+                    <FolderOpen className="w-3 h-3 text-textSubtle" />
+                  ) : (
+                    <Document className="w-3 h-3 text-textSubtle" />
+                  )}
+                  <span className="max-w-[200px] truncate" title={contextPath.path}>
+                    {contextPath.path.split('/').pop() || contextPath.path}
+                  </span>
+                </div>
+              ))}
             </div>
           )}
 

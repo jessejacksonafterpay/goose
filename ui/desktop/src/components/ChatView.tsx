@@ -121,7 +121,6 @@ function ChatContent({
   const [isGeneratingRecipe, setIsGeneratingRecipe] = useState(false);
   const [sessionTokenCount, setSessionTokenCount] = useState<number>(0);
   const [ancestorMessages, setAncestorMessages] = useState<Message[]>([]);
-  const [readyForAutoUserPrompt, setReadyForAutoUserPrompt] = useState(false);
   const [sessionContextPaths, setSessionContextPaths] = useState<ContextPathItem[]>([]);
   const [pastedImages, setPastedImages] = useState<PastedImage[]>([]);
 
@@ -137,39 +136,6 @@ function ChatContent({
     hasContextHandlerContent,
     getContextHandlerType,
   } = useChatContextManager();
-
-  useEffect(() => {
-    // Log all messages when the component first mounts
-    window.electron.logInfo(
-      'Initial messages when resuming session: ' + JSON.stringify(chat.messages, null, 2)
-    );
-
-    // Extract context files from loaded session messages
-    const extractContextPathsFromMessages = (messages: Message[]): ContextPathItem[] => {
-      const contextPaths = new Map<string, ContextPathItem>();
-
-      for (const message of messages) {
-        for (const content of message.content) {
-          if (content.type === 'contextPaths') {
-            for (const pathItem of content.paths) {
-              // Use path as key to avoid duplicates, but preserve the type information
-              contextPaths.set(pathItem.path, pathItem);
-            }
-          }
-        }
-      }
-
-      return Array.from(contextPaths.values());
-    };
-
-    const extractedContextPaths = extractContextPathsFromMessages(chat.messages);
-    if (extractedContextPaths.length > 0) {
-      setSessionContextPaths(extractedContextPaths);
-    }
-
-    // Set ready for auto user prompt after component initialization
-    setReadyForAutoUserPrompt(true);
-  }, [chat.messages]);
 
   // Get recipeConfig directly from appConfig
   const recipeConfig = window.appConfig.get('recipeConfig') as Recipe | null;
@@ -351,8 +317,7 @@ function ChatContent({
       recipeConfig?.isScheduledExecution &&
       recipeConfig?.prompt &&
       messages.length === 0 &&
-      !isLoading &&
-      readyForAutoUserPrompt
+      !isLoading
     ) {
       console.log('Auto-sending prompt for scheduled execution:', recipeConfig.prompt);
 
@@ -374,7 +339,6 @@ function ChatContent({
     recipeConfig?.prompt,
     messages.length,
     isLoading,
-    readyForAutoUserPrompt,
     append,
     setLastInteractionTime,
   ]);
@@ -386,7 +350,12 @@ function ChatContent({
     const combinedTextFromInput = customEvent.detail?.value || '';
     const contextPaths = customEvent.detail?.contextPaths || [];
 
-    if (combinedTextFromInput.trim()) {
+    // Allow submission if there's text or context paths
+    const hasText = combinedTextFromInput.trim();
+    const hasContextPaths = contextPaths.length > 0;
+    const hasContent = hasText || hasContextPaths;
+
+    if (hasContent) {
       setLastInteractionTime(Date.now());
 
       // Calculate the updated context files (combining existing and new ones)
@@ -398,12 +367,14 @@ function ChatContent({
         );
         if (newContextPaths.length > 0) {
           updatedContextPaths.push(...newContextPaths);
-          setSessionContextPaths(updatedContextPaths);
         }
       }
 
-      // Create user message with both text and all accumulated session context files
-      const userMessage = createUserMessage(combinedTextFromInput.trim(), updatedContextPaths);
+      // Create user message with text (if any) and context paths
+      const userMessage = createUserMessage(
+        hasText ? combinedTextFromInput.trim() : '',
+        updatedContextPaths
+      );
 
       if (summarizedThread.length > 0) {
         resetMessagesWithSummary(
@@ -425,6 +396,9 @@ function ChatContent({
           scrollRef.current.scrollToBottom();
         }
       }
+
+      // Clear sessionContextPaths after sending the message
+      setSessionContextPaths([]);
     } else {
       // If nothing was actually submitted (e.g. empty input and no images pasted)
       window.electron.stopPowerSaveBlocker();
