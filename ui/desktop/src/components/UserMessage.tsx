@@ -34,14 +34,17 @@ export default function UserMessage({ message }: UserMessageProps) {
     <div className="flex justify-end mt-[16px] w-full opacity-0 animate-[appear_150ms_ease-in_forwards]">
       <div className="flex-col max-w-[85%]">
         <div className="flex flex-col group">
-          <div className="flex bg-slate text-white rounded-xl rounded-br-none py-2 px-3">
-            <div ref={contentRef}>
-              <MarkdownContent
-                content={displayText}
-                className="text-white prose-a:text-white user-message"
-              />
+          {/* Only render the text message box if there is text to display */}
+          {displayText && (
+            <div className="flex bg-slate text-white rounded-xl rounded-br-none py-2 px-3">
+              <div ref={contentRef}>
+                <MarkdownContent
+                  content={displayText}
+                  className="text-white prose-a:text-white user-message"
+                />
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Render images if any */}
           {imagePaths.length > 0 && (

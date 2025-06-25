@@ -658,6 +658,7 @@ export default function ChatInput({
 
   const handleDrop = (evt: React.DragEvent<HTMLDivElement>) => {
     evt.preventDefault();
+    evt.stopPropagation(); // Prevent parent drop handler from firing
     const files = Array.from(evt.dataTransfer.files);
     const imageFiles = files.filter((file) => file.type.startsWith('image/'));
     const nonImageFiles = files.filter((file) => !file.type.startsWith('image/'));
