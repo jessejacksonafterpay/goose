@@ -191,6 +191,9 @@ export default function ChatInput({
     // Handle non-image files first - add them to sessionContextPaths
     if (nonImageFiles.length > 0 && setSessionContextPaths) {
       const processNonImageFiles = async () => {
+        // Collect all new context paths first
+        const newContextPathItems: ContextPathItem[] = [];
+
         for (const file of nonImageFiles) {
           try {
             // Get the file path using the electron API
@@ -207,12 +210,17 @@ export default function ChatInput({
                   path: filePath,
                   type: pathType,
                 };
-                setSessionContextPaths([...sessionContextPaths, newContextPath]);
+                newContextPathItems.push(newContextPath);
               }
             }
           } catch (error) {
             console.error('Error processing dropped file:', error);
           }
+        }
+
+        // Update sessionContextPaths with all new items at once
+        if (newContextPathItems.length > 0) {
+          setSessionContextPaths([...sessionContextPaths, ...newContextPathItems]);
         }
       };
       processNonImageFiles();
@@ -535,6 +543,9 @@ export default function ChatInput({
     try {
       const filePaths = await window.electron.selectMultipleFiles();
       if (filePaths.length > 0) {
+        // Collect all new context paths first
+        const newContextPathItems: ContextPathItem[] = [];
+
         // Process each file path
         for (const filePath of filePaths) {
           try {
@@ -640,7 +651,7 @@ export default function ChatInput({
                 }, 3000);
               }
             } else {
-              // Handle non-image files - add them to sessionContextPaths (existing behavior)
+              // Handle non-image files - collect them for batch update
               if (setSessionContextPaths) {
                 // Check if this path is already in sessionContextPaths
                 const isAlreadyAdded = sessionContextPaths.some((item) => item.path === filePath);
@@ -650,13 +661,18 @@ export default function ChatInput({
                     path: filePath,
                     type: pathType,
                   };
-                  setSessionContextPaths([...sessionContextPaths, newContextPath]);
+                  newContextPathItems.push(newContextPath);
                 }
               }
             }
           } catch (error) {
             console.error('Error processing selected file:', filePath, error);
           }
+        }
+
+        // Update sessionContextPaths with all new items at once
+        if (newContextPathItems.length > 0 && setSessionContextPaths) {
+          setSessionContextPaths([...sessionContextPaths, ...newContextPathItems]);
         }
       }
       setIsContextMenuOpen(false);
@@ -676,6 +692,9 @@ export default function ChatInput({
     // Handle non-image files first - add them to sessionContextPaths
     if (nonImageFiles.length > 0 && setSessionContextPaths) {
       const processNonImageFiles = async () => {
+        // Collect all new context paths first
+        const newContextPathItems: ContextPathItem[] = [];
+
         for (const file of nonImageFiles) {
           try {
             // Get the file path using the electron API
@@ -692,12 +711,17 @@ export default function ChatInput({
                   path: filePath,
                   type: pathType,
                 };
-                setSessionContextPaths([...sessionContextPaths, newContextPath]);
+                newContextPathItems.push(newContextPath);
               }
             }
           } catch (error) {
             console.error('Error processing dropped file:', error);
           }
+        }
+
+        // Update sessionContextPaths with all new items at once
+        if (newContextPathItems.length > 0) {
+          setSessionContextPaths([...sessionContextPaths, ...newContextPathItems]);
         }
       };
       processNonImageFiles();
